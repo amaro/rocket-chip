@@ -10,6 +10,7 @@ import freechips.rocketchip.coreplex.CacheBlockBytes
 import freechips.rocketchip.tile._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
+import freechips.rocketchip.pfa._
 import scala.collection.mutable.ListBuffer
 
 class PTWReq(implicit p: Parameters) extends CoreBundle()(p) {
@@ -84,7 +85,7 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
   val r_req = Reg(new PTWReq)
   val r_req_dest = Reg(Bits())
   val r_pte = Reg(new PTE)
-  
+
   val vpn_idxs = (0 until pgLevels).map(i => (r_req.addr >> (pgLevels-i-1)*pgLevelBits)(pgLevelBits-1,0))
   val vpn_idx = vpn_idxs(count)
 
@@ -193,7 +194,7 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
 
     (s2_hit, s2_valid && s2_valid_bit, s2_pte, Some(ram))
   }
-  
+
   io.mem.req.valid := state === s_req && !l2_valid
   io.mem.req.bits.phys := Bool(true)
   io.mem.req.bits.cmd  := M_XRD
@@ -201,7 +202,7 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
   io.mem.req.bits.addr := pte_addr
   io.mem.s1_kill := s1_kill || l2_hit
   io.mem.invalidate_lr := Bool(false)
-  
+
   val pmaPgLevelHomogeneous = (0 until pgLevels) map { i =>
     TLBPageLookup(edge.manager.managers, xLen, p(CacheBlockBytes), BigInt(1) << (pgIdxBits + ((pgLevels - 1 - i) * pgLevelBits)))(pte_addr >> pgIdxBits << pgIdxBits).homogeneous
   }

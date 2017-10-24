@@ -10,6 +10,7 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tile._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
+import freechips.rocketchip.pfa._
 
 case object RocketTilesKey extends Field[Seq[RocketTileParams]](Nil)
 case object RocketCrossing extends Field[CoreplexClockCrossing](SynchronousCrossing())
@@ -18,6 +19,7 @@ trait HasRocketTiles extends HasSystemBus
     with HasPeripheryBus
     with HasPeripheryPLIC
     with HasPeripheryClint
+    with HasPeripheryPFA
     with HasPeripheryDebug {
   val module: HasRocketTilesModuleImp
 
