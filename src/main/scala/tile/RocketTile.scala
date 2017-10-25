@@ -10,6 +10,7 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.rocket._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
+import freechips.rocketchip.pfa._
 
 case class RocketTileParams(
     core: RocketCoreParams = RocketCoreParams(),
@@ -28,7 +29,7 @@ case class RocketTileParams(
   require(icache.isDefined)
   require(dcache.isDefined)
 }
-  
+
 class RocketTile(val rocketParams: RocketTileParams)(implicit p: Parameters) extends BaseTile(rocketParams)(p)
     with HasExternalInterrupts
     with HasLazyRoCC  // implies CanHaveSharedFPU with CanHavePTW with HasHellaCache
@@ -179,6 +180,7 @@ class RocketTileModule(outer: RocketTile) extends BaseTileModule(outer, () => ne
   // TODO figure out how to move the below into their respective mix-ins
   dcacheArb.io.requestor <> dcachePorts
   ptw.io.requestor <> ptwPorts
+  ptw.io.pfa <> io.pfa
 }
 
 abstract class RocketTileWrapper(rtp: RocketTileParams)(implicit p: Parameters) extends LazyModule {

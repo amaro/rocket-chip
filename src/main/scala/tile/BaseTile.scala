@@ -9,6 +9,7 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.rocket._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
+import freechips.rocketchip.pfa._
 
 case object SharedMemoryTLEdge extends Field[TLEdgeOut]
 case object TileKey extends Field[TileParams]
@@ -91,6 +92,7 @@ trait HasTileLinkMasterPortModule {
 trait HasExternallyDrivenTileConstants extends Bundle with HasTileParameters {
   val hartid = UInt(INPUT, hartIdLen)
   val reset_vector = UInt(INPUT, resetVectorLen)
+  val pfa = new PFAIO
 }
 
 trait CanHaveInstructionTracePort extends Bundle with HasTileParameters {

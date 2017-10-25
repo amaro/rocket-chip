@@ -73,6 +73,7 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
     val requestor = Vec(n, new TLBPTWIO).flip
     val mem = new HellaCacheIO
     val dpath = new DatapathPTWIO
+    val pfa = new PFAIO
   }
 
   val s_ready :: s_req :: s_wait1 :: s_wait2 :: Nil = Enum(UInt(), 4)

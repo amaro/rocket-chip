@@ -136,6 +136,8 @@ trait HasRocketTilesModuleImp extends LazyModuleImp
     wire.hartid := UInt(i)
     wire.reset_vector := global_reset_vector
   }
+
+  outer.pfa.module.io.remoteFault <> outer.rocket_tiles(0).module.io.pfa
 }
 
 class RocketCoreplex(implicit p: Parameters) extends BaseCoreplex

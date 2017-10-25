@@ -19,7 +19,7 @@ class EvictIO extends Bundle {
   val comp = Flipped(Decoupled(Bool()))
 }
 
-class RemoteFaultIO extends Bundle {
+class PFAIO extends Bundle {
   val req = Flipped(Decoupled(UInt(64.W))) // the cpu drives the requests
   val comp = Decoupled(UInt(64.W)) // pfa's replies here
 }
@@ -32,7 +32,7 @@ class PFAFetchPath(implicit p: Parameters) extends LazyModule {
 
 class PFAFetchPathModule(outer: PFAFetchPath) extends LazyModuleImp(outer) {
   val io = IO(new Bundle {
-    val remoteFault = new RemoteFaultIO
+    val remoteFault = Flipped(new PFAIO)
   })
 }
 
@@ -152,7 +152,7 @@ class PFA(addr: BigInt, nicaddr: BigInt, beatBytes: Int = 8)(implicit p: Paramet
     val io = IO(new Bundle {
       val tlout = dmanode.bundleOut
       val tlin = mmionode.bundleIn
-      val remoteFault = new RemoteFaultIO
+      val remoteFault = Flipped(new PFAIO)
     })
 
     io.remoteFault <> fetchPath.module.io.remoteFault
