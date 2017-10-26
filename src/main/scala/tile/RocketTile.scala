@@ -180,7 +180,7 @@ class RocketTileModule(outer: RocketTile) extends BaseTileModule(outer, () => ne
   // TODO figure out how to move the below into their respective mix-ins
   dcacheArb.io.requestor <> dcachePorts
   ptw.io.requestor <> ptwPorts
-  ptw.io.pfa <> io.pfa
+  io.pfa := ptw.io.pfa
 }
 
 abstract class RocketTileWrapper(rtp: RocketTileParams)(implicit p: Parameters) extends LazyModule {
