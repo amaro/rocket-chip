@@ -20,7 +20,7 @@ class TLWriterIO extends Bundle {
     val addr = UInt(64.W) // memory address to write to
     val data = UInt(64.W)
   })
-  val comp = Flipped(Decoupled(Bool()))
+  val resp = Flipped(Decoupled(Bool()))
 }
 
 class TLWriterModule(outer: TLWriter) extends LazyModuleImp(outer) {
@@ -57,8 +57,8 @@ class TLWriterModule(outer: TLWriter) extends LazyModuleImp(outer) {
   tl.d.ready := xact_busy.orR
 
   io.write.req.ready := state === s_idle
-  io.write.comp.valid := state === s_comp && !xact_busy.orR
-  io.write.comp.bits := true.B
+  io.write.resp.valid := state === s_comp && !xact_busy.orR
+  io.write.resp.bits := true.B
 
   when (io.write.req.fire()) {
     baseAddr := io.write.req.bits.addr >> byteAddrBits.U
@@ -70,7 +70,7 @@ class TLWriterModule(outer: TLWriter) extends LazyModuleImp(outer) {
     state := s_comp
   }
 
-  when (io.write.comp.fire()) {
+  when (io.write.resp.fire()) {
     state := s_idle
   }
 }
@@ -85,7 +85,7 @@ class TLReaderIO extends Bundle {
   val req = Decoupled(new Bundle {
     val addr = UInt(64.W) // memory address to read from
   })
-  val comp = Flipped(Decoupled(new Bundle {
+  val resp = Flipped(Decoupled(new Bundle {
     val data = UInt(64.W)
   }))
 }
@@ -112,15 +112,15 @@ class TLReaderModule(outer: TLReader) extends LazyModuleImp(outer) {
     toAddress = io.read.req.bits.addr,
     lgSize = 1.U)._2
 
-  io.read.comp.valid := tl.d.valid && inflight
-  tl.d.ready := io.read.comp.ready && inflight
-  io.read.comp.bits.data := tl.d.bits.data
+  io.read.resp.valid := tl.d.valid && inflight
+  tl.d.ready := io.read.resp.ready && inflight
+  io.read.resp.bits.data := tl.d.bits.data
 
   when (tl.a.fire()) {
     inflight := true.B
   }
 
-  when (io.read.comp.fire()) {
+  when (io.read.resp.fire()) {
     inflight := false.B
   }
 }

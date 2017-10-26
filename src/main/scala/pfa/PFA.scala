@@ -16,12 +16,16 @@ class EvictIO extends Bundle {
   // requests are pfns and they are handled in PFAEvictPath
   val req = Decoupled(UInt(64.W))
   // high when a req has completed
-  val comp = Flipped(Decoupled(Bool()))
+  val resp = Flipped(Decoupled(Bool()))
 }
 
 class PFAIO extends Bundle {
-  val req = Flipped(Decoupled(UInt(64.W))) // the cpu drives the requests
-  val comp = Decoupled(UInt(64.W)) // pfa's replies here
+  // the ptw drives the requests
+  val req = Decoupled(new Bundle {
+    val pageid = UInt(28.W)
+    val protbits = UInt(10.W)
+  })
+  val resp = Flipped(Decoupled(UInt(64.W))) // pfa's replies
 }
 
 case class PFAControllerParams(addr: BigInt, beatBytes: Int)
@@ -51,13 +55,13 @@ class PFAEvictPathModule(outer: PFAEvictPath, nicaddr: BigInt) extends LazyModul
 
   val s = RegInit(s_idle)
   val frameaddr = RegInit(0.U(64.W))
-  val sendCompFired = RegNext(send.comp.fire(), false.B)
+  val sendCompFired = RegNext(send.resp.fire(), false.B)
   val evictFired = RegNext(io.evict.req.fire(), false.B)
   val pageid = RegInit(0.U(32.W))
 
   io.evict.req.ready := s === s_idle
-  io.evict.comp.valid := s === s_comp
-  io.evict.comp.bits := true.B
+  io.evict.resp.valid := s === s_comp
+  io.evict.resp.bits := true.B
 
   send.req.valid := MuxCase(0.U, Array(
             (s === s_frame1) -> evictFired,
@@ -75,7 +79,7 @@ class PFAEvictPathModule(outer: PFAEvictPath, nicaddr: BigInt) extends LazyModul
             (s === s_frame2) -> 1.U,
             (s === s_frame3) -> 2.U))
   send.req.bits.pageid := pageid
-  send.comp.ready := s === s_frame1 || s === s_frame2 || s === s_frame3
+  send.resp.ready := s === s_frame1 || s === s_frame2 || s === s_frame3
 
   when (io.evict.req.fire()) {
     pageid := io.evict.req.bits(63,36)
@@ -83,7 +87,7 @@ class PFAEvictPathModule(outer: PFAEvictPath, nicaddr: BigInt) extends LazyModul
     s := s_frame1
   }
 
-  when (send.comp.fire()) {
+  when (send.resp.fire()) {
     switch (s) {
       is (s_frame1) { s := s_frame2 }
       is (s_frame2) { s := s_frame3 }
@@ -91,7 +95,7 @@ class PFAEvictPathModule(outer: PFAEvictPath, nicaddr: BigInt) extends LazyModul
     }
   }
 
-  when (io.evict.comp.fire()) {
+  when (io.evict.resp.fire()) {
     s := s_idle
   }
 }
@@ -107,10 +111,10 @@ trait PFAControllerModule extends Module with HasRegMap {
   val qDepth = 10
 
   val evictQueue = Module(new Queue(UInt(64.W), qDepth))
-  val evictsInProg = TwoWayCounter(io.evict.req.fire(), io.evict.comp.fire(), qDepth)
+  val evictsInProg = TwoWayCounter(io.evict.req.fire(), io.evict.resp.fire(), qDepth)
   val evictStat = RegInit(0.U(64.W))
   io.evict.req <> evictQueue.io.deq
-  io.evict.comp.ready := true.B // always ready to evict?
+  io.evict.resp.ready := true.B // always ready to evict?
   evictStat := Mux(evictsInProg > evictQueue.io.count, evictsInProg, evictQueue.io.count)
 
   val workbufQueue = Module(new Queue(UInt(64.W), 1))

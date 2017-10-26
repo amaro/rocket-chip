@@ -29,7 +29,7 @@ class SendFramePacketIO extends Bundle {
     val part_id = UInt(8.W)
     val pageid = UInt(8.W)
   })
-  val comp = Flipped(Decoupled(Bool()))
+  val resp = Flipped(Decoupled(Bool()))
 }
 
 class SendFramePacketModule(outer: SendFramePacket, nicaddr: BigInt)
@@ -52,14 +52,14 @@ class SendFramePacketModule(outer: SendFramePacket, nicaddr: BigInt)
 
   val s = RegInit(s_idle)
   val sendReqFired = RegNext(io.sendframe.req.fire(), false.B)
-  val writeCompFired = RegNext(write.comp.fire(), false.B)
-  val readCompFired = RegNext(read.comp.fire(), false.B)
+  val writeCompFired = RegNext(write.resp.fire(), false.B)
+  val readCompFired = RegNext(read.resp.fire(), false.B)
   val nicSentPackets = Wire(0.U(4.W))
 
   write.req.valid := s === s_send && sendReqFired
   write.req.bits.data := Cat(0.U(5.W), len, 0.U(9.W), addr)
   write.req.bits.addr := nicSendReq.U
-  write.comp.ready := s === s_send
+  write.resp.ready := s === s_send
 
   read.req.valid := MuxCase(false.B, Array(
                       (s === s_wait) -> (writeCompFired || readCompFired),
@@ -67,23 +67,23 @@ class SendFramePacketModule(outer: SendFramePacket, nicaddr: BigInt)
   read.req.bits.addr := MuxCase(0.U, Array(
                       (s === s_wait) -> nicSendCompAddr.U,
                       (s === s_ack) -> nicSendAckCompAddr.U))
-  read.comp.ready := s === s_wait || s === s_ack
+  read.resp.ready := s === s_wait || s === s_ack
 
   io.sendframe.req.ready := s === s_idle
-  io.sendframe.comp.valid := s === s_comp
-  io.sendframe.comp.bits := true.B
+  io.sendframe.resp.valid := s === s_comp
+  io.sendframe.resp.bits := true.B
 
   io.workbuf.ready := s === s_idle
 
-  nicSentPackets := (read.comp.bits.data >> 40) & 0xF.U
+  nicSentPackets := (read.resp.bits.data >> 40) & 0xF.U
 
   when (io.sendframe.req.fire()) {
     s := s_send
   }
-  when (write.comp.fire()) {
+  when (write.resp.fire()) {
     s := s_wait
   }
-  when (read.comp.fire()) {
+  when (read.resp.fire()) {
     switch (s) {
       is (s_wait) {
         s := Mux(nicSentPackets > 0.U, s_ack, s_wait)
@@ -93,7 +93,7 @@ class SendFramePacketModule(outer: SendFramePacket, nicaddr: BigInt)
       }
     }
   }
-  when (io.sendframe.comp.fire()) {
+  when (io.sendframe.resp.fire()) {
     s := s_idle
   }
 }
