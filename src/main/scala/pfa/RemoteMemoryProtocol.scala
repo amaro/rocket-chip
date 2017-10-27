@@ -8,56 +8,72 @@ import freechips.rocketchip.rocket.PAddrBits
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.pfa._
 
-// Sends subsets of frames in network packets based on remote memory protocol
+// Sends subset of frame in a network packet based on remote memory protocol
 // Waits for send completion
-class SendFramePacket(nicaddr: BigInt)(implicit p: Parameters) extends LazyModule {
-  val tlwriter = LazyModule(new TLWriter("pfa-sendframe-write"))
+class SendPacket(nicaddr: BigInt, name: String)(implicit p: Parameters) extends LazyModule {
+  val tlwriter = LazyModule(new TLWriter(name))
   val writenode = TLOutputNode()
   writenode := tlwriter.node
 
-  val tlreader = LazyModule(new TLReader("pfa-sendframe-read"))
+  val tlreader = LazyModule(new TLReader(name))
   val readnode = TLOutputNode()
   readnode := tlreader.node
 
-  lazy val module = new SendFramePacketModule(this, nicaddr)
+  lazy val module = new SendPacketModule(this, nicaddr)
 }
 
-class SendFramePacketIO extends Bundle {
-  val req = Decoupled(new Bundle {
-    val addr = UInt(39.W)
-    val len = UInt(11.W)
-    val part_id = UInt(8.W)
-    val pageid = UInt(8.W)
-  })
+class PacketHeader extends Bundle {
+  val version = UInt(8.W)
+  val opcode = UInt(8.W)
+  val partid = UInt(8.W)
+  val reserved = UInt(8.W)
+  val pageid = UInt(32.W)
+  val xactid = UInt(8.W)
+}
+
+class PacketPayload extends Bundle {
+  val addr = UInt(39.W) // addr the nic will read the payload from
+  val len = UInt(11.W)  // length of payload
+}
+
+class SendPacketReq extends Bundle {
+  val header = new PacketHeader
+  val payload = new PacketPayload
+}
+
+class SendPacketIO extends Bundle {
+  val req = Decoupled(new SendPacketReq)
   val resp = Flipped(Decoupled(Bool()))
 }
 
-class SendFramePacketModule(outer: SendFramePacket, nicaddr: BigInt)
+// Writes an address to the respective nic register so the nic takes the data
+// and pushes it to the network
+class SendPacketModule(outer: SendPacket, nicaddr: BigInt)
     extends LazyModuleImp(outer) {
   val io = IO(new Bundle {
     val tlwrite = outer.writenode.bundleOut
     val tlread = outer.readnode.bundleOut
-    val sendframe = Flipped(new SendFramePacketIO)
+    val sendpacket = Flipped(new SendPacketIO)
     val workbuf = Flipped(Decoupled(UInt(64.W)))
   })
 
   val write = outer.tlwriter.module.io.write
   val read = outer.tlreader.module.io.read
-  val addr = io.sendframe.req.bits.addr
-  val len = io.sendframe.req.bits.len
+  val packetReq = io.sendpacket.req.bits
+  val pktpayload = packetReq.payload
   val nicSendReq = nicaddr
   val nicSendCompAddr = nicaddr + 20 // how many completions are available
   val nicSendAckCompAddr = nicaddr + 16 // ack the completions by reading
   val s_idle :: s_send :: s_wait :: s_ack :: s_comp :: Nil = Enum(5)
 
   val s = RegInit(s_idle)
-  val sendReqFired = RegNext(io.sendframe.req.fire(), false.B)
+  val sendReqFired = RegNext(io.sendpacket.req.fire(), false.B)
   val writeCompFired = RegNext(write.resp.fire(), false.B)
   val readCompFired = RegNext(read.resp.fire(), false.B)
   val nicSentPackets = Wire(0.U(4.W))
 
   write.req.valid := s === s_send && sendReqFired
-  write.req.bits.data := Cat(0.U(5.W), len, 0.U(9.W), addr)
+  write.req.bits.data := Cat(0.U(5.W), pktpayload.len, 0.U(9.W), pktpayload.addr)
   write.req.bits.addr := nicSendReq.U
   write.resp.ready := s === s_send
 
@@ -69,15 +85,15 @@ class SendFramePacketModule(outer: SendFramePacket, nicaddr: BigInt)
                       (s === s_ack) -> nicSendAckCompAddr.U))
   read.resp.ready := s === s_wait || s === s_ack
 
-  io.sendframe.req.ready := s === s_idle
-  io.sendframe.resp.valid := s === s_comp
-  io.sendframe.resp.bits := true.B
+  io.sendpacket.req.ready := s === s_idle
+  io.sendpacket.resp.valid := s === s_comp
+  io.sendpacket.resp.bits := true.B
 
   io.workbuf.ready := s === s_idle
 
   nicSentPackets := (read.resp.bits.data >> 40) & 0xF.U
 
-  when (io.sendframe.req.fire()) {
+  when (io.sendpacket.req.fire()) {
     s := s_send
   }
   when (write.resp.fire()) {
@@ -93,7 +109,7 @@ class SendFramePacketModule(outer: SendFramePacket, nicaddr: BigInt)
       }
     }
   }
-  when (io.sendframe.resp.fire()) {
+  when (io.sendpacket.resp.fire()) {
     s := s_idle
   }
 }

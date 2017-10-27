@@ -57,12 +57,12 @@ class PFAEvictPath(nicaddr: BigInt)(implicit p: Parameters) extends LazyModule {
 class PFAEvictPathModule(outer: PFAEvictPath, nicaddr: BigInt) extends LazyModuleImp(outer) {
   val io = IO(new Bundle {
     val evict = Flipped(new EvictIO)
-    val sendframe = new SendFramePacketIO
+    val sendpacket = new SendPacketIO
   })
 
   val s_idle :: s_frame1 :: s_frame2 :: s_frame3 :: s_comp :: Nil = Enum(5)
-  val send = io.sendframe
-
+  val send = io.sendpacket
+  val packetReq = io.sendpacket.req.bits
   val s = RegInit(s_idle)
   val frameaddr = RegInit(0.U(64.W))
   val sendCompFired = RegNext(send.resp.fire(), false.B)
@@ -76,19 +76,19 @@ class PFAEvictPathModule(outer: PFAEvictPath, nicaddr: BigInt) extends LazyModul
   send.req.valid := MuxCase(0.U, Array(
             (s === s_frame1) -> evictFired,
             (s === s_frame2 || s === s_frame3) -> sendCompFired))
-  send.req.bits.addr := MuxCase(0.U, Array(
+  packetReq.payload.addr := MuxCase(0.U, Array(
             (s === s_frame1) -> (frameaddr),
             (s === s_frame2) -> (frameaddr + 1368.U),
             (s === s_frame3) -> (frameaddr + 2736.U)))
-  send.req.bits.len := MuxCase(0.U, Array(
+  packetReq.payload.len := MuxCase(0.U, Array(
             (s === s_frame1) -> 1368.U,
             (s === s_frame2) -> 1368.U,
             (s === s_frame3) -> 1360.U))
-  send.req.bits.part_id := MuxCase(0.U, Array(
+  packetReq.header.partid := MuxCase(0.U, Array(
             (s === s_frame1) -> 0.U,
             (s === s_frame2) -> 1.U,
             (s === s_frame3) -> 2.U))
-  send.req.bits.pageid := pageid
+  packetReq.header.pageid := pageid
   send.resp.ready := s === s_frame1 || s === s_frame2 || s === s_frame3
 
   when (io.evict.req.fire()) {
@@ -153,14 +153,17 @@ class PFA(addr: BigInt, nicaddr: BigInt, beatBytes: Int = 8)(implicit p: Paramet
       PFAControllerParams(addr, beatBytes)))
   val fetchPath = LazyModule(new PFAFetchPath)
   val evictPath = LazyModule(new PFAEvictPath(nicaddr))
-  val sendFramePkt = LazyModule(new SendFramePacket(nicaddr))
+  val sendframePkt1 = LazyModule(new SendPacket(nicaddr, "pfa-sendframe1"))
+  val sendframePkt2 = LazyModule(new SendPacket(nicaddr, "pfa-sendframe2")) // TODO: use arb instead
 
   val mmionode = TLInputNode()
   val dmanode = TLOutputNode()
 
   control.node := mmionode;
-  dmanode := sendFramePkt.writenode
-  dmanode := sendFramePkt.readnode
+  dmanode := sendframePkt1.writenode
+  dmanode := sendframePkt1.readnode
+  dmanode := sendframePkt2.writenode
+  dmanode := sendframePkt2.readnode
 
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new Bundle {
@@ -171,8 +174,9 @@ class PFA(addr: BigInt, nicaddr: BigInt, beatBytes: Int = 8)(implicit p: Paramet
 
     io.remoteFault <> fetchPath.module.io.remoteFault
     evictPath.module.io.evict <> control.module.io.evict
-    sendFramePkt.module.io.workbuf <> control.module.io.workbuf
-    evictPath.module.io.sendframe <> sendFramePkt.module.io.sendframe
+    sendframePkt1.module.io.workbuf <> control.module.io.workbuf
+    sendframePkt2.module.io.workbuf <> control.module.io.workbuf
+    evictPath.module.io.sendpacket <> sendframePkt1.module.io.sendpacket
   }
 }
 
