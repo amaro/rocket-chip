@@ -227,6 +227,7 @@ abstract class RocketTileWrapper(rtp: RocketTileParams)(implicit p: Parameters) 
     rocket.module.io.reset_vector := io.reset_vector
     io.trace.foreach { _ := rocket.module.io.trace.get }
     io.halt_and_catch_fire.foreach { _ := rocket.module.io.halt_and_catch_fire.get }
+    io.pfa <> rocket.module.io.pfa
   }
 }
 
