@@ -68,6 +68,16 @@ class PTE(implicit p: Parameters) extends CoreBundle()(p) {
   def sx(dummy: Int = 0) = leaf() && x
 }
 
+class RemotePTE(implicit p: Parameters) extends CoreBundle()(p) {
+  val unused = Bits(width = 24)
+  val pageid = Bits(width = 28)
+  val prot = Bits(width = 10)
+  val r = Bool()
+  val v = Bool()
+
+  def remote(dummy: Int = 0) = !v && r
+}
+
 class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(p) {
   val io = new Bundle {
     val requestor = Vec(n, new TLBPTWIO).flip
@@ -76,7 +86,7 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
     val pfa = new PFAIO
   }
 
-  val s_ready :: s_req :: s_wait1 :: s_wait2 :: Nil = Enum(UInt(), 4)
+  val s_ready :: s_req :: s_wait1 :: s_wait2 :: s_pfareq :: s_pfawait :: Nil = Enum(UInt(), 6)
   val state = Reg(init=s_ready)
   val count = Reg(UInt(width = log2Up(pgLevels)))
   val s1_kill = Reg(next = Bool(false))
@@ -222,6 +232,12 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
     io.requestor(i).pmp := io.dpath.pmp
   }
 
+  val remote_pte = pte.asTypeOf(new RemotePTE)
+  io.pfa.req.valid := state === s_pfareq
+  io.pfa.req.bits.pageid := remote_pte.pageid
+  io.pfa.req.bits.protbits := remote_pte.prot
+  io.pfa.resp.ready := state === s_pfawait
+
   // control state machine
   switch (state) {
     is (s_ready) {
@@ -252,16 +268,30 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
           state := s_req
           count := count + 1
         }.otherwise {
-          l2_refill := pte.v && !invalid_paddr && count === pgLevels-1
-          resp_ae := pte.v && invalid_paddr
-          state := s_ready
-          resp_valid(r_req_dest) := true
+          when (remote_pte.remote()) {
+            state := s_pfareq
+          } .otherwise {
+            l2_refill := pte.v && !invalid_paddr && count === pgLevels-1
+            resp_ae := pte.v && invalid_paddr
+            state := s_ready
+            resp_valid(r_req_dest) := true
+          }
         }
       }
       when (io.mem.s2_xcpt.ae.ld) {
         resp_ae := true
         state := s_ready
         resp_valid(r_req_dest) := true
+      }
+    }
+    is (s_pfareq) {
+      when (io.pfa.req.fire()) {
+        state := s_pfawait
+      }
+    }
+    is (s_pfawait) {
+      when (io.pfa.resp.fire()) {
+        state := s_req
       }
     }
   }

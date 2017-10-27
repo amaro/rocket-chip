@@ -38,6 +38,16 @@ class PFAFetchPathModule(outer: PFAFetchPath) extends LazyModuleImp(outer) {
   val io = IO(new Bundle {
     val remoteFault = Flipped(new PFAIO)
   })
+
+  val s_idle :: s_frame1 :: s_frame2 :: s_frame3 :: s_pte :: s_comp :: Nil = Enum(6)
+
+  val s = RegInit(s_idle)
+
+  io.remoteFault.req.ready := s === s_idle
+
+  when (io.remoteFault.req.fire()) {
+    assert(false.B === true.B)
+  }
 }
 
 class PFAEvictPath(nicaddr: BigInt)(implicit p: Parameters) extends LazyModule {
@@ -178,4 +188,3 @@ trait HasPeripheryPFA extends HasSystemBus {
 trait HasPeripheryPFAModuleImp extends LazyMultiIOModuleImp {
   val outer: HasPeripheryPFA
 }
-
