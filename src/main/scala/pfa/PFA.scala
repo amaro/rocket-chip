@@ -114,7 +114,7 @@ class PFAEvictPathModule(outer: PFAEvictPath, nicaddr: BigInt) extends LazyModul
 trait PFAControllerBundle extends Bundle {
   val evict = new EvictIO
   val free = Decoupled(UInt(64.W))
-  val workbuf = Valid(UInt(64.W))
+  val workbuf = Valid(UInt(39.W))
 }
 
 trait PFAControllerModule extends Module with HasRegMap {
@@ -129,7 +129,7 @@ trait PFAControllerModule extends Module with HasRegMap {
   evictStat := Mux(evictsInProg > evictQueue.io.count, evictsInProg, evictQueue.io.count)
 
   val workbufQueue = Module(new Queue(UInt(64.W), 1))
-  io.workbuf.bits <> workbufQueue.io.deq.bits
+  io.workbuf.bits <> workbufQueue.io.deq.bits(38, 0)
   io.workbuf.valid <> workbufQueue.io.deq.valid
   //workbufQueue.io.deq.ready := true.B
 

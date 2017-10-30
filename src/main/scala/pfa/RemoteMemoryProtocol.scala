@@ -23,7 +23,7 @@ class SendPacket(nicaddr: BigInt, name: String)(implicit p: Parameters) extends 
 }
 
 class PacketHeader extends Bundle {
-  val version = UInt(8.W)
+  //val version = UInt(8.W)
   val opcode = UInt(8.W)
   val partid = UInt(8.W)
   val reserved = UInt(8.W)
@@ -54,28 +54,44 @@ class SendPacketModule(outer: SendPacket, nicaddr: BigInt)
     val tlwrite = outer.writenode.bundleOut
     val tlread = outer.readnode.bundleOut
     val sendpacket = Flipped(new SendPacketIO)
-    val workbuf = Flipped(Valid(UInt(64.W)))
+    val workbuf = Flipped(Valid(UInt(39.W)))
   })
 
   val write = outer.tlwriter.module.io.write
   val read = outer.tlreader.module.io.read
-  val packetReq = io.sendpacket.req.bits
-  val pktpayload = packetReq.payload
-  val nicSendReq = nicaddr
+  val pktRequest = io.sendpacket.req.bits
+  val pktHeader = pktRequest.header
+  val pktPayload = pktRequest.payload
+  val nicSendReqAddr = nicaddr
   val nicSendCompAddr = nicaddr + 20 // how many completions are available
   val nicSendAckCompAddr = nicaddr + 16 // ack the completions by reading
-  val s_idle :: s_send :: s_wait :: s_ack :: s_comp :: Nil = Enum(5)
+
+  // s_header: write header to workbuf
+  // s_send1: write workbuf (with header) to nicSendReqAddr
+  // s_send2: write payload addr to nicSendReqAddr
+  // s_wait: wait for nic completion
+  // s_ack: ack completions to nic
+  val s_idle :: s_header :: s_send1 :: s_send2 :: s_wait :: s_ack :: s_comp :: Nil = Enum(7)
 
   val s = RegInit(s_idle)
   val sendReqFired = RegNext(io.sendpacket.req.fire(), false.B)
   val writeCompFired = RegNext(write.resp.fire(), false.B)
   val readCompFired = RegNext(read.resp.fire(), false.B)
   val nicSentPackets = Wire(0.U(4.W))
+  val nicWorkbufReq = Wire(0.U(64.W))
+  val nicPayloadReq = Wire(0.U(64.W))
 
-  write.req.valid := s === s_send && sendReqFired
-  write.req.bits.data := Cat(0.U(5.W), pktpayload.len, 0.U(9.W), pktpayload.addr)
-  write.req.bits.addr := nicSendReq.U
-  write.resp.ready := s === s_send
+  write.req.valid := MuxCase(false.B, Array(
+                      (s === s_header) -> sendReqFired,
+                      (s === s_send1 || s === s_send2) -> writeCompFired))
+  write.req.bits.data := MuxCase(0.U, Array(
+                      (s === s_header) -> pktHeader.asUInt,
+                      (s === s_send1) -> nicWorkbufReq,
+                      (s === s_send2) -> nicPayloadReq))
+  write.req.bits.addr := MuxCase(0.U, Array(
+                      (s === s_header) -> io.workbuf.bits,
+                      (s === s_send1 || s === s_send2) -> nicSendReqAddr.U))
+  write.resp.ready := s === s_header || s === s_send1 || s === s_send2
 
   read.req.valid := MuxCase(false.B, Array(
                       (s === s_wait) -> (writeCompFired || readCompFired),
@@ -90,17 +106,23 @@ class SendPacketModule(outer: SendPacket, nicaddr: BigInt)
   io.sendpacket.resp.bits := true.B
 
   nicSentPackets := (read.resp.bits.data >> 40) & 0xF.U
+  nicWorkbufReq := Cat(0.U(5.W), 8.U, 0.U(9.W), io.workbuf.bits)
+  nicPayloadReq := Cat(0.U(5.W), pktPayload.len, 0.U(9.W), pktPayload.addr)
 
   when (io.sendpacket.req.fire()) {
-    s := s_send
+    s := s_header
   }
   when (write.resp.fire()) {
-    s := s_wait
+    switch (s) {
+      is (s_header) { s := s_send1 }
+      is (s_send1) { s := s_send2 }
+      is (s_send2) { s := s_wait }
+    }
   }
   when (read.resp.fire()) {
     switch (s) {
       is (s_wait) {
-        s := Mux(nicSentPackets > 0.U, s_ack, s_wait)
+        s := Mux(nicSentPackets > 1.U, s_ack, s_wait) // TODO: set to 0 with multisegment
       }
       is (s_ack) {
         s := s_comp
