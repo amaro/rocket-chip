@@ -6,11 +6,9 @@ import freechips.rocketchip.coreplex.HasSystemBus
 import freechips.rocketchip.config.{Field, Parameters}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.regmapper.{HasRegMap, RegField}
-import freechips.rocketchip.rocket.PAddrBits
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.TwoWayCounter
 import freechips.rocketchip.pfa._
-import scala.util.Random
 
 class EvictIO extends Bundle {
   // requests are pfns and they are handled in PFAEvictPath
@@ -117,7 +115,7 @@ trait PFAControllerBundle extends Bundle {
   val workbuf = Valid(UInt(39.W))
 }
 
-trait PFAControllerModule extends Module with HasRegMap {
+trait PFAControllerModule extends HasRegMap {
   val io: PFAControllerBundle
   val qDepth = 10
 
@@ -159,8 +157,8 @@ class PFA(addr: BigInt, nicaddr: BigInt, beatBytes: Int = 8)(implicit p: Paramet
   val sendframePkt1 = LazyModule(new SendPacket(nicaddr, "pfa-sendframe1"))
   val sendframePkt2 = LazyModule(new SendPacket(nicaddr, "pfa-sendframe2")) // TODO: use arb instead
 
-  val mmionode = TLInputNode()
-  val dmanode = TLOutputNode()
+  val mmionode = TLIdentityNode()
+  val dmanode = TLIdentityNode()
 
   control.node := mmionode;
   dmanode := sendframePkt1.writenode
@@ -170,8 +168,6 @@ class PFA(addr: BigInt, nicaddr: BigInt, beatBytes: Int = 8)(implicit p: Paramet
 
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new Bundle {
-      val tlout = dmanode.bundleOut
-      val tlin = mmionode.bundleIn
       val remoteFault = Flipped(new PFAIO)
     })
 
@@ -193,6 +189,7 @@ trait HasPeripheryPFA extends HasSystemBus {
   sbus.fromSyncPorts() :=* pfa.dmanode
 }
 
-trait HasPeripheryPFAModuleImp extends LazyMultiIOModuleImp {
+// TODO: can we remove this?
+trait HasPeripheryPFAModuleImp extends LazyModuleImp {
   val outer: HasPeripheryPFA
 }

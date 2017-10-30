@@ -4,7 +4,6 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.config.{Field, Parameters}
 import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.rocket.PAddrBits
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.pfa._
 
@@ -12,11 +11,11 @@ import freechips.rocketchip.pfa._
 // Waits for send completion
 class SendPacket(nicaddr: BigInt, name: String)(implicit p: Parameters) extends LazyModule {
   val tlwriter = LazyModule(new TLWriter(name))
-  val writenode = TLOutputNode()
+  val writenode = TLIdentityNode()
   writenode := tlwriter.node
 
   val tlreader = LazyModule(new TLReader(name))
-  val readnode = TLOutputNode()
+  val readnode = TLIdentityNode()
   readnode := tlreader.node
 
   lazy val module = new SendPacketModule(this, nicaddr)
@@ -51,8 +50,8 @@ class SendPacketIO extends Bundle {
 class SendPacketModule(outer: SendPacket, nicaddr: BigInt)
     extends LazyModuleImp(outer) {
   val io = IO(new Bundle {
-    val tlwrite = outer.writenode.bundleOut
-    val tlread = outer.readnode.bundleOut
+    //val tlwrite = outer.writenode.bundleOut
+    //val tlread = outer.readnode.bundleOut
     val sendpacket = Flipped(new SendPacketIO)
     val workbuf = Flipped(Valid(UInt(39.W)))
   })
@@ -77,9 +76,9 @@ class SendPacketModule(outer: SendPacket, nicaddr: BigInt)
   val sendReqFired = RegNext(io.sendpacket.req.fire(), false.B)
   val writeCompFired = RegNext(write.resp.fire(), false.B)
   val readCompFired = RegNext(read.resp.fire(), false.B)
-  val nicSentPackets = Wire(0.U(4.W))
-  val nicWorkbufReq = Wire(0.U(64.W))
-  val nicPayloadReq = Wire(0.U(64.W))
+  val nicSentPackets = WireInit((read.resp.bits.data >> 40) & 0xF.U)
+  val nicWorkbufReq = WireInit(0.U(64.W))
+  val nicPayloadReq = WireInit(0.U(64.W))
 
   write.req.valid := MuxCase(false.B, Array(
                       (s === s_header) -> sendReqFired,
@@ -105,7 +104,7 @@ class SendPacketModule(outer: SendPacket, nicaddr: BigInt)
   io.sendpacket.resp.valid := s === s_comp
   io.sendpacket.resp.bits := true.B
 
-  nicSentPackets := (read.resp.bits.data >> 40) & 0xF.U
+  //nicSentPackets := (read.resp.bits.data >> 40) & 0xF.U
   nicWorkbufReq := Cat(0.U(5.W), 8.U, 0.U(9.W), io.workbuf.bits)
   nicPayloadReq := Cat(0.U(5.W), pktPayload.len, 0.U(9.W), pktPayload.addr)
 

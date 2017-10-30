@@ -4,13 +4,26 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.config.{Field, Parameters}
 import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.rocket.PAddrBits
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.pfa._
 
+object TLHelper {
+  def makeClientNode(name: String, sourceId: IdRange)
+                    (implicit valName: ValName): TLClientNode =
+    makeClientNode(TLClientParameters(name, sourceId))
+
+  def makeClientNode(params: TLClientParameters)
+                    (implicit valName: ValName): TLClientNode =
+    TLClientNode(Seq(TLClientPortParameters(Seq(params))))
+
+  def makeManagerNode(beatBytes: Int, params: TLManagerParameters)
+                     (implicit valName: ValName): TLManagerNode =
+    TLManagerNode(Seq(TLManagerPortParameters(Seq(params), beatBytes)))
+}
+
 // TLWriter writes 64bits to memory at specified addr
 class TLWriter(name: String)(implicit p: Parameters) extends LazyModule {
-  val node = TLClientNode(TLClientParameters(
+  val node = TLHelper.makeClientNode(TLClientParameters(
     name = name, sourceId = IdRange(0, 1)))
   lazy val module = new TLWriterModule(this)
 }
@@ -25,15 +38,13 @@ class TLWriterIO extends Bundle {
 
 class TLWriterModule(outer: TLWriter) extends LazyModuleImp(outer) {
   val io = IO(new Bundle {
-    val tl = outer.node.bundleOut
     val write = Flipped(new TLWriterIO)
   })
 
-  val tl = io.tl(0)
-  val edge = outer.node.edgesOut(0)
+  val (tl, edge) = outer.node.out(0)
   val beatBytes = tl.params.dataBits / 8
   val byteAddrBits = log2Ceil(beatBytes)
-  val addrBits = p(PAddrBits) - byteAddrBits
+  val addrBits = tl.params.addressBits - byteAddrBits
 
   val s_idle :: s_writing :: s_comp :: Nil = Enum(3)
   val state = RegInit(s_idle)
@@ -76,7 +87,7 @@ class TLWriterModule(outer: TLWriter) extends LazyModuleImp(outer) {
 }
 
 class TLReader(name: String)(implicit p: Parameters) extends LazyModule {
-  val node = TLClientNode(TLClientParameters(
+  val node = TLHelper.makeClientNode(TLClientParameters(
     name = name, sourceId = IdRange(0, 1)))
   lazy val module = new TLReaderModule(this)
 }
@@ -92,17 +103,12 @@ class TLReaderIO extends Bundle {
 
 class TLReaderModule(outer: TLReader) extends LazyModuleImp(outer) {
   val io = IO(new Bundle {
-    val tl = outer.node.bundleOut
     val read = Flipped(new TLReaderIO)
   })
 
-  val tl = io.tl(0)
-  val edge = outer.node.edgesOut(0)
-  //val grantqueue = Queue(tl.d, 1)
+  val (tl, edge) = outer.node.out(0)
   val beatBytes = tl.params.dataBits / 8
   val byteAddrBits = log2Ceil(beatBytes)
-  val addrBits = p(PAddrBits) - byteAddrBits
-
   val inflight = RegInit(false.B)
 
   tl.a.valid := !inflight && io.read.req.valid
