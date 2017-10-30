@@ -37,6 +37,7 @@ class PFAFetchPath(implicit p: Parameters) extends LazyModule {
 class PFAFetchPathModule(outer: PFAFetchPath) extends LazyModuleImp(outer) {
   val io = IO(new Bundle {
     val remoteFault = Flipped(new PFAIO)
+    val sendpacket = new SendPacketIO
   })
 
   val s_idle :: s_frame1 :: s_frame2 :: s_frame3 :: s_pte :: s_comp :: Nil = Enum(6)
@@ -113,7 +114,7 @@ class PFAEvictPathModule(outer: PFAEvictPath, nicaddr: BigInt) extends LazyModul
 trait PFAControllerBundle extends Bundle {
   val evict = new EvictIO
   val free = Decoupled(UInt(64.W))
-  val workbuf = Decoupled(UInt(64.W))
+  val workbuf = Valid(UInt(64.W))
 }
 
 trait PFAControllerModule extends Module with HasRegMap {
@@ -128,7 +129,9 @@ trait PFAControllerModule extends Module with HasRegMap {
   evictStat := Mux(evictsInProg > evictQueue.io.count, evictsInProg, evictQueue.io.count)
 
   val workbufQueue = Module(new Queue(UInt(64.W), 1))
-  io.workbuf <> workbufQueue.io.deq
+  io.workbuf.bits <> workbufQueue.io.deq.bits
+  io.workbuf.valid <> workbufQueue.io.deq.valid
+  //workbufQueue.io.deq.ready := true.B
 
   val freeQueue = Module(new Queue(UInt(64.W), qDepth))
   io.free <> freeQueue.io.deq
@@ -174,9 +177,10 @@ class PFA(addr: BigInt, nicaddr: BigInt, beatBytes: Int = 8)(implicit p: Paramet
 
     io.remoteFault <> fetchPath.module.io.remoteFault
     evictPath.module.io.evict <> control.module.io.evict
-    sendframePkt1.module.io.workbuf <> control.module.io.workbuf
-    sendframePkt2.module.io.workbuf <> control.module.io.workbuf
+    sendframePkt1.module.io.workbuf := control.module.io.workbuf
+    sendframePkt2.module.io.workbuf := control.module.io.workbuf
     evictPath.module.io.sendpacket <> sendframePkt1.module.io.sendpacket
+    fetchPath.module.io.sendpacket <> sendframePkt2.module.io.sendpacket
   }
 }
 

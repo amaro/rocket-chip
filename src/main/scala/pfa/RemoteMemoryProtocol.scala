@@ -54,7 +54,7 @@ class SendPacketModule(outer: SendPacket, nicaddr: BigInt)
     val tlwrite = outer.writenode.bundleOut
     val tlread = outer.readnode.bundleOut
     val sendpacket = Flipped(new SendPacketIO)
-    val workbuf = Flipped(Decoupled(UInt(64.W)))
+    val workbuf = Flipped(Valid(UInt(64.W)))
   })
 
   val write = outer.tlwriter.module.io.write
@@ -85,11 +85,9 @@ class SendPacketModule(outer: SendPacket, nicaddr: BigInt)
                       (s === s_ack) -> nicSendAckCompAddr.U))
   read.resp.ready := s === s_wait || s === s_ack
 
-  io.sendpacket.req.ready := s === s_idle
+  io.sendpacket.req.ready := s === s_idle && io.workbuf.valid
   io.sendpacket.resp.valid := s === s_comp
   io.sendpacket.resp.bits := true.B
-
-  io.workbuf.ready := s === s_idle
 
   nicSentPackets := (read.resp.bits.data >> 40) & 0xF.U
 
