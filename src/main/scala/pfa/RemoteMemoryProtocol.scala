@@ -77,8 +77,8 @@ class SendPacketModule(outer: SendPacket, nicaddr: BigInt)
   val writeCompFired = RegNext(write.resp.fire(), false.B)
   val readCompFired = RegNext(read.resp.fire(), false.B)
   val nicSentPackets = WireInit((read.resp.bits.data >> 40) & 0xF.U)
-  val nicWorkbufReq = WireInit(0.U(64.W))
-  val nicPayloadReq = WireInit(0.U(64.W))
+  val nicWorkbufReq = WireInit(Cat(1.U(1.W), 8.U(15.W), 0.U(9.W), io.workbuf.bits))
+  val nicPayloadReq = WireInit(Cat(0.U(5.W), pktPayload.len, 0.U(9.W), pktPayload.addr))
 
   write.req.valid := MuxCase(false.B, Array(
                       (s === s_header) -> sendReqFired,
@@ -103,10 +103,6 @@ class SendPacketModule(outer: SendPacket, nicaddr: BigInt)
   io.sendpacket.req.ready := s === s_idle && io.workbuf.valid
   io.sendpacket.resp.valid := s === s_comp
   io.sendpacket.resp.bits := true.B
-
-  //nicSentPackets := (read.resp.bits.data >> 40) & 0xF.U
-  nicWorkbufReq := Cat(0.U(5.W), 8.U, 0.U(9.W), io.workbuf.bits)
-  nicPayloadReq := Cat(0.U(5.W), pktPayload.len, 0.U(9.W), pktPayload.addr)
 
   when (io.sendpacket.req.fire()) {
     s := s_header
