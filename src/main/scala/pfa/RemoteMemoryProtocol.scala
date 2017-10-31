@@ -25,9 +25,8 @@ class PacketHeader extends Bundle {
   //val version = UInt(8.W)
   val opcode = UInt(8.W)
   val partid = UInt(8.W)
-  val reserved = UInt(8.W)
   val pageid = UInt(32.W)
-  val xactid = UInt(8.W)
+  val xactid = UInt(16.W)
 }
 
 class PacketPayload extends Bundle {
@@ -50,8 +49,6 @@ class SendPacketIO extends Bundle {
 class SendPacketModule(outer: SendPacket, nicaddr: BigInt)
     extends LazyModuleImp(outer) {
   val io = IO(new Bundle {
-    //val tlwrite = outer.writenode.bundleOut
-    //val tlread = outer.readnode.bundleOut
     val sendpacket = Flipped(new SendPacketIO)
     val workbuf = Flipped(Valid(UInt(39.W)))
   })
@@ -117,7 +114,7 @@ class SendPacketModule(outer: SendPacket, nicaddr: BigInt)
   when (read.resp.fire()) {
     switch (s) {
       is (s_wait) {
-        s := Mux(nicSentPackets > 1.U, s_ack, s_wait) // TODO: set to 0 with multisegment
+        s := Mux(nicSentPackets > 0.U, s_ack, s_wait)
       }
       is (s_ack) {
         s := s_comp

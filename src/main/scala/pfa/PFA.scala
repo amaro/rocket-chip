@@ -61,12 +61,16 @@ class PFAEvictPathModule(outer: PFAEvictPath, nicaddr: BigInt) extends LazyModul
 
   val s_idle :: s_frame1 :: s_frame2 :: s_frame3 :: s_comp :: Nil = Enum(5)
   val send = io.sendpacket
-  val packetReq = io.sendpacket.req.bits
+  val pktRequest = io.sendpacket.req.bits
+  val pktHeader = pktRequest.header
+  val pktPayload = pktRequest.payload
+
   val s = RegInit(s_idle)
   val frameaddr = RegInit(0.U(64.W))
   val sendCompFired = RegNext(send.resp.fire(), false.B)
   val evictFired = RegNext(io.evict.req.fire(), false.B)
   val pageid = RegInit(0.U(32.W))
+  val xactid = Counter(io.evict.req.fire(), (1 << 16) - 1)._1
 
   io.evict.req.ready := s === s_idle
   io.evict.resp.valid := s === s_comp
@@ -75,19 +79,24 @@ class PFAEvictPathModule(outer: PFAEvictPath, nicaddr: BigInt) extends LazyModul
   send.req.valid := MuxCase(0.U, Array(
             (s === s_frame1) -> evictFired,
             (s === s_frame2 || s === s_frame3) -> sendCompFired))
-  packetReq.payload.addr := MuxCase(0.U, Array(
+
+  pktPayload.addr := MuxCase(0.U, Array(
             (s === s_frame1) -> (frameaddr),
             (s === s_frame2) -> (frameaddr + 1368.U),
             (s === s_frame3) -> (frameaddr + 2736.U)))
-  packetReq.payload.len := MuxCase(0.U, Array(
+  pktPayload.len := MuxCase(0.U, Array(
             (s === s_frame1) -> 1368.U,
             (s === s_frame2) -> 1368.U,
             (s === s_frame3) -> 1360.U))
-  packetReq.header.partid := MuxCase(0.U, Array(
+
+  pktHeader.opcode := 1.U // write
+  pktHeader.partid := MuxCase(0.U, Array(
             (s === s_frame1) -> 0.U,
             (s === s_frame2) -> 1.U,
             (s === s_frame3) -> 2.U))
-  packetReq.header.pageid := pageid
+  pktHeader.pageid := pageid
+  pktHeader.xactid := xactid
+
   send.resp.ready := s === s_frame1 || s === s_frame2 || s === s_frame3
 
   when (io.evict.req.fire()) {
@@ -187,9 +196,4 @@ trait HasPeripheryPFA extends HasSystemBus {
   val pfa = LazyModule(new PFA(pfaaddr, nicaddr, sbus.beatBytes))
   pfa.mmionode := sbus.toVariableWidthSlaves
   sbus.fromSyncPorts() :=* pfa.dmanode
-}
-
-// TODO: can we remove this?
-trait HasPeripheryPFAModuleImp extends LazyModuleImp {
-  val outer: HasPeripheryPFA
 }
