@@ -114,7 +114,7 @@ class SendPacketModule(outer: SendPacket, nicaddr: BigInt)
   when (read.resp.fire()) {
     switch (s) {
       is (s_wait) {
-        s := Mux(nicSentPackets > 0.U, s_ack, s_wait)
+        s := Mux(nicSentPackets > 1.U, s_ack, s_wait) // 2 segments = 2 comps
       }
       is (s_ack) {
         s := s_comp
