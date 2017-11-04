@@ -23,7 +23,7 @@ class PFAIO extends Bundle {
     val pageid = UInt(28.W)
     val protbits = UInt(10.W)
   })
-  val resp = Flipped(Decoupled(UInt(64.W))) // pfa's replies
+  val resp = Flipped(Decoupled(UInt(64.W))) // pfa's replies TODO: whats this for?
 }
 
 case class PFAControllerParams(addr: BigInt, beatBytes: Int)
@@ -34,17 +34,77 @@ class PFAFetchPath(implicit p: Parameters) extends LazyModule {
 
 class PFAFetchPathModule(outer: PFAFetchPath) extends LazyModuleImp(outer) {
   val io = IO(new Bundle {
-    val remoteFault = Flipped(new PFAIO)
+    val fetch = Flipped(new PFAIO)
+    val free = Flipped(Decoupled(UInt(64.W)))
     val sendpacket = new SendPacketIO
+    val recvpacket = new RecvPacketIO
   })
 
-  val s_idle :: s_frame1 :: s_frame2 :: s_frame3 :: s_pte :: s_comp :: Nil = Enum(6)
+  // s_sendreq: sends a request packet with required pageid
+  // s_nicrecv: writes recv addr (from free queue) to nic recv register
+  // s_modpte: update pte, point to new paddr and mark as not remote and valid
+  val s_idle :: s_sendreq :: s_nicrecv :: s_modpte :: s_comp :: Nil = Enum(5)
+  val send = io.sendpacket
+  val recv = io.recvpacket
+  val sendPktReq = send.req.bits
+  val sendPktHeader = sendPktReq.header
+  val sendPktPayload = sendPktReq.payload
 
   val s = RegInit(s_idle)
+  val targetaddr = RegInit(0.U(64.W))
+  val pageid = RegInit(0.U(28.W))
+  val protbits = RegInit(0.U(10.W))
+  val fetchFired = RegNext(io.fetch.req.fire(), false.B)
+  val sendRespFired = RegNext(send.resp.fire(), false.B)
+  val recvRespFired = RegNext(recv.resp.fire(), false.B)
+  val xactid = Counter(io.fetch.req.fire(), (1 << 16) - 1)._1
+  val frameFrag = Counter(recv.resp.fire(), 3)._1
 
-  io.remoteFault.req.ready := s === s_idle
+  io.fetch.req.ready := s === s_idle && targetaddr != 0.U
+  io.fetch.resp.valid := s === s_comp
+  io.fetch.resp.bits := 0.U
 
-  when (io.remoteFault.req.fire()) {
+  io.free.ready := s === s_idle
+
+  send.req.valid := s === s_sendreq && fetchFired
+  send.resp.ready := s === s_sendreq
+  // we don't need a payload
+  sendPktPayload.addr := 0.U
+  sendPktPayload.len := 0.U
+  sendPktHeader.opcode := 0.U // read
+  sendPktHeader.partid := 0.U
+  sendPktHeader.pageid := pageid
+  sendPktHeader.xactid := xactid
+
+  recv.req.valid := MuxCase(false.B, Array(
+              (s === s_nicrecv && frameFrag === 0.U) -> sendRespFired,
+              (s === s_nicrecv && frameFrag === 1.U) -> recvRespFired,
+              (s === s_nicrecv && frameFrag === 2.U) -> recvRespFired))
+  recv.resp.ready := s === s_nicrecv
+  recv.req.bits.taddr := MuxCase(targetaddr, Array(
+              (frameFrag === 1.U) -> (targetaddr + 1368.U),
+              (frameFrag === 2.U) -> (targetaddr + 2736.U)))
+
+  when (io.free.fire()) {
+    targetaddr := io.free.bits
+  }
+
+  when (io.fetch.req.fire()) {
+    pageid := io.fetch.req.bits.pageid
+    protbits := io.fetch.req.bits.protbits
+    s := s_sendreq
+  }
+
+  when (send.resp.fire()) {
+    s := s_nicrecv
+  }
+
+  // move to s_modpte when we are done receiving the frame completely
+  when (recv.resp.fire()) {
+    s := Mux(frameFrag === 2.U, s_modpte, s_nicrecv)
+  }
+
+  when (s === s_modpte) {
     assert(false.B === true.B)
   }
 }
@@ -165,6 +225,7 @@ class PFA(addr: BigInt, nicaddr: BigInt, beatBytes: Int = 8)(implicit p: Paramet
   val evictPath = LazyModule(new PFAEvictPath(nicaddr))
   val sendframePkt1 = LazyModule(new SendPacket(nicaddr, "pfa-sendframe1"))
   val sendframePkt2 = LazyModule(new SendPacket(nicaddr, "pfa-sendframe2")) // TODO: use arb instead
+  val recvframePkt = LazyModule(new RecvPacket(nicaddr, "pfa-recvframe1"))
 
   val mmionode = TLIdentityNode()
   val dmanode = TLIdentityNode()
@@ -174,18 +235,24 @@ class PFA(addr: BigInt, nicaddr: BigInt, beatBytes: Int = 8)(implicit p: Paramet
   dmanode := sendframePkt1.readnode
   dmanode := sendframePkt2.writenode
   dmanode := sendframePkt2.readnode
+  dmanode := recvframePkt.writenode
+  dmanode := recvframePkt.readnode
 
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new Bundle {
       val remoteFault = Flipped(new PFAIO)
     })
 
-    io.remoteFault <> fetchPath.module.io.remoteFault
+    sendframePkt1.module.io.workbuf <> control.module.io.workbuf
+    sendframePkt2.module.io.workbuf <> control.module.io.workbuf
+
     evictPath.module.io.evict <> control.module.io.evict
-    sendframePkt1.module.io.workbuf := control.module.io.workbuf
-    sendframePkt2.module.io.workbuf := control.module.io.workbuf
     evictPath.module.io.sendpacket <> sendframePkt1.module.io.sendpacket
+
+    io.remoteFault <> fetchPath.module.io.fetch
     fetchPath.module.io.sendpacket <> sendframePkt2.module.io.sendpacket
+    fetchPath.module.io.recvpacket <> recvframePkt.module.io.recvpacket
+    fetchPath.module.io.free <> control.module.io.free
   }
 }
 
