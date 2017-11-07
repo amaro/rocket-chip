@@ -22,6 +22,8 @@ class PFAIO extends Bundle {
   val req = Decoupled(new Bundle {
     val pageid = UInt(28.W)
     val protbits = UInt(10.W)
+    val faultvpn = UInt(27.W)
+    val pteppn = UInt(54.W)
   })
   val resp = Flipped(Decoupled(UInt(64.W))) // pfa's replies TODO: whats this for?
 }
@@ -29,6 +31,9 @@ class PFAIO extends Bundle {
 case class PFAControllerParams(addr: BigInt, beatBytes: Int)
 
 class PFAFetchPath(implicit p: Parameters) extends LazyModule {
+  val tlwriter = LazyModule(new TLWriter("pfa-fetch-modpte"))
+  val writenode = TLIdentityNode()
+  writenode := tlwriter.node
   lazy val module = new PFAFetchPathModule(this)
 }
 
@@ -40,6 +45,7 @@ class PFAFetchPathModule(outer: PFAFetchPath) extends LazyModuleImp(outer) {
     val recvpacket = new RecvPacketIO
   })
 
+  val write = outer.tlwriter.module.io.write
   // s_sendreq: sends a request packet with required pageid
   // s_nicrecv: writes recv addr (from free queue) to nic recv register
   // s_modpte: update pte, point to new paddr and mark as not remote and valid
@@ -54,15 +60,20 @@ class PFAFetchPathModule(outer: PFAFetchPath) extends LazyModuleImp(outer) {
   val targetaddr = RegInit(0.U(64.W))
   val pageid = RegInit(0.U(28.W))
   val protbits = RegInit(0.U(10.W))
+  val pteppn = RegInit(0.U(54.W))
+  val faultvpn = RegInit(0.U(27.W))
   val fetchFired = RegNext(io.fetch.req.fire(), false.B)
   val sendRespFired = RegNext(send.resp.fire(), false.B)
   val recvRespFired = RegNext(recv.resp.fire(), false.B)
   val xactid = Counter(io.fetch.req.fire(), (1 << 16) - 1)._1
   val frameFrag = Counter(recv.resp.fire(), 3)._1
+  val newpte = RegInit(0.U(64.W))
+
+  newpte := ((targetaddr >> 12.U) << 10.U) | protbits
 
   io.fetch.req.ready := s === s_idle && targetaddr != 0.U
   io.fetch.resp.valid := s === s_comp
-  io.fetch.resp.bits := 0.U
+  io.fetch.resp.bits := newpte
 
   io.free.ready := s === s_idle
 
@@ -85,6 +96,11 @@ class PFAFetchPathModule(outer: PFAFetchPath) extends LazyModuleImp(outer) {
               (frameFrag === 1.U) -> (targetaddr + 1368.U),
               (frameFrag === 2.U) -> (targetaddr + 2736.U)))
 
+  write.req.valid := s === s_modpte && recvRespFired
+  write.req.bits.data := newpte
+  write.req.bits.addr := pteppn
+  write.resp.ready := s === s_modpte
+
   when (io.free.fire()) {
     targetaddr := io.free.bits
   }
@@ -92,6 +108,8 @@ class PFAFetchPathModule(outer: PFAFetchPath) extends LazyModuleImp(outer) {
   when (io.fetch.req.fire()) {
     pageid := io.fetch.req.bits.pageid
     protbits := io.fetch.req.bits.protbits
+    pteppn := io.fetch.req.bits.pteppn
+    faultvpn := io.fetch.req.bits.faultvpn
     s := s_sendreq
   }
 
@@ -104,8 +122,13 @@ class PFAFetchPathModule(outer: PFAFetchPath) extends LazyModuleImp(outer) {
     s := Mux(frameFrag === 2.U, s_modpte, s_nicrecv)
   }
 
-  when (s === s_modpte) {
-    assert(false.B === true.B)
+  // write request to update pte is done
+  when (write.resp.fire()) {
+    s := s_comp
+  }
+
+  when (io.fetch.resp.fire()) {
+    s := s_idle
   }
 }
 
@@ -237,6 +260,7 @@ class PFA(addr: BigInt, nicaddr: BigInt, beatBytes: Int = 8)(implicit p: Paramet
   dmanode := sendframePkt2.readnode
   dmanode := recvframePkt.writenode
   dmanode := recvframePkt.readnode
+  dmanode := fetchPath.writenode
 
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new Bundle {

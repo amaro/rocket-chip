@@ -232,10 +232,13 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
     io.requestor(i).pmp := io.dpath.pmp
   }
 
-  val remote_pte = pte.asTypeOf(new RemotePTE)
+  val pfa_pteppn = RegInit(UInt(0, 54))
+  val pfa_rpte = pte.asTypeOf(new RemotePTE)
   io.pfa.req.valid := state === s_pfareq
-  io.pfa.req.bits.pageid := remote_pte.pageid
-  io.pfa.req.bits.protbits := remote_pte.prot
+  io.pfa.req.bits.pageid := pfa_rpte.pageid
+  io.pfa.req.bits.protbits := pfa_rpte.prot
+  io.pfa.req.bits.faultvpn := r_req.addr
+  io.pfa.req.bits.pteppn := pfa_pteppn
   io.pfa.resp.ready := state === s_pfawait
 
   // control state machine
@@ -268,7 +271,8 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
           state := s_req
           count := count + 1
         }.otherwise {
-          when (remote_pte.remote()) {
+          when (pfa_rpte.remote()) {
+            pfa_pteppn := pte_addr
             state := s_pfareq
           } .otherwise {
             l2_refill := pte.v && !invalid_paddr && count === pgLevels-1
@@ -291,7 +295,9 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
     }
     is (s_pfawait) {
       when (io.pfa.resp.fire()) {
-        state := s_req
+        r_pte := new PTE().fromBits(io.pfa.resp.bits)
+        state := s_ready
+        resp_valid(r_req_dest) := true
       }
     }
   }
