@@ -17,6 +17,13 @@ class EvictIO extends Bundle {
   val resp = Flipped(Decoupled(Bool()))
 }
 
+class NewpageIO extends Bundle {
+  val req = Decoupled(new Bundle {
+    val pageid = UInt(28.W)
+    val vaddr = UInt(39.W)
+  })
+}
+
 class PFAIO extends Bundle {
   // the ptw drives the requests
   val req = Decoupled(new Bundle {
@@ -41,6 +48,7 @@ class PFAFetchPathModule(outer: PFAFetchPath) extends LazyModuleImp(outer) {
   val io = IO(new Bundle {
     val fetch = Flipped(new PFAIO)
     val free = Flipped(Decoupled(UInt(64.W)))
+    val newpages = new NewpageIO
     val sendpacket = new SendPacketIO
     val recvpacket = new RecvPacketIO
   })
@@ -71,11 +79,15 @@ class PFAFetchPathModule(outer: PFAFetchPath) extends LazyModuleImp(outer) {
 
   newpte := ((targetaddr >> 12.U) << 10.U) | protbits
 
-  io.fetch.req.ready := s === s_idle && targetaddr != 0.U
+  io.fetch.req.ready := s === s_idle && targetaddr != 0.U && io.newpages.req.ready
   io.fetch.resp.valid := s === s_comp
   io.fetch.resp.bits := newpte
 
   io.free.ready := s === s_idle
+
+  io.newpages.req.valid := s === s_comp
+  io.newpages.req.bits.pageid := pageid
+  io.newpages.req.bits.vaddr := faultvpn << 12.U
 
   send.req.valid := s === s_sendreq && fetchFired
   send.resp.ready := s === s_sendreq
@@ -129,6 +141,7 @@ class PFAFetchPathModule(outer: PFAFetchPath) extends LazyModuleImp(outer) {
 
   when (io.fetch.resp.fire()) {
     s := s_idle
+
   }
 }
 
@@ -203,6 +216,7 @@ class PFAEvictPathModule(outer: PFAEvictPath, nicaddr: BigInt) extends LazyModul
 
 trait PFAControllerBundle extends Bundle {
   val evict = new EvictIO
+  val newpages = Flipped(new NewpageIO)
   val free = Decoupled(UInt(64.W))
   val workbuf = Valid(UInt(39.W))
 }
@@ -221,17 +235,28 @@ trait PFAControllerModule extends HasRegMap {
   val workbufQueue = Module(new Queue(UInt(64.W), 1))
   io.workbuf.bits <> workbufQueue.io.deq.bits(38, 0)
   io.workbuf.valid <> workbufQueue.io.deq.valid
-  //workbufQueue.io.deq.ready := true.B
+  workbufQueue.io.deq.ready := false.B
 
   val freeQueue = Module(new Queue(UInt(64.W), qDepth))
   io.free <> freeQueue.io.deq
 
+  val newPageidQueue = Module(new Queue(UInt(28.W), qDepth))
+  val newVaddrQueue = Module(new Queue(UInt(39.W), qDepth))
+  newPageidQueue.io.enq.valid := io.newpages.req.valid
+  newVaddrQueue.io.enq.valid := io.newpages.req.valid
+  io.newpages.req.ready := newPageidQueue.io.enq.ready && newVaddrQueue.io.enq.ready
+  newPageidQueue.io.enq.bits := io.newpages.req.bits.pageid
+  newVaddrQueue.io.enq.bits := io.newpages.req.bits.vaddr
+
   regmap(
-    0x0 -> Seq(RegField.w(64, freeQueue.io.enq)),
-    0x8 -> Seq(RegField.r(64, qDepth.U - freeQueue.io.count)),
-    0x10 -> Seq(RegField.w(64, evictQueue.io.enq)),
-    0x18 -> Seq(RegField.r(64, qDepth.U - evictStat)),
-    0x38 -> Seq(RegField.w(64, workbufQueue.io.enq)))
+    0 -> Seq(RegField.w(64, freeQueue.io.enq)),              // free queue
+    8 -> Seq(RegField.r(64, qDepth.U - freeQueue.io.count)), // free stat
+    16 -> Seq(RegField.w(64, evictQueue.io.enq)),            // evict queue
+    24 -> Seq(RegField.r(64, qDepth.U - evictStat)),         // evict stat
+    32 -> Seq(RegField.r(64, newPageidQueue.io.deq)),        // new pageid queue
+    40 -> Seq(RegField.r(64, newVaddrQueue.io.deq)),         // new vaddr queue
+    48 -> Seq(RegField.r(64, newPageidQueue.io.count)),      // new stat
+    56 -> Seq(RegField.w(64, workbufQueue.io.enq)))          // workbuf
 }
 
 class PFAController(c: PFAControllerParams)(implicit p: Parameters)
@@ -277,6 +302,7 @@ class PFA(addr: BigInt, nicaddr: BigInt, beatBytes: Int = 8)(implicit p: Paramet
     fetchPath.module.io.sendpacket <> sendframePkt2.module.io.sendpacket
     fetchPath.module.io.recvpacket <> recvframePkt.module.io.recvpacket
     fetchPath.module.io.free <> control.module.io.free
+    control.module.io.newpages <> fetchPath.module.io.newpages
   }
 }
 
