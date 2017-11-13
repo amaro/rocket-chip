@@ -78,6 +78,7 @@ class SendPacketModule(outer: SendPacket, nicaddr: BigInt)
   val nicSentPackets = WireInit((read.resp.bits.data >> 40) & 0xF.U)
   val nicWorkbufReq = WireInit(0.U(64.W))
   val nicPayloadReq = WireInit(Cat(0.U(5.W), pktPayload.len, 0.U(9.W), pktPayload.addr))
+  val numAcksSent = Counter(read.resp.fire() && s === s_ack, 2)._1
 
   nicWorkbufReq := Cat(Mux(sendPayload, 1.U(1.W), 0.U(1.W)), 8.U(15.W), 0.U(9.W), io.workbuf.bits)
 
@@ -107,6 +108,8 @@ class SendPacketModule(outer: SendPacket, nicaddr: BigInt)
 
   when (io.sendpacket.req.fire()) {
     s := s_header
+    sendPayload := true.B
+    numAcksSent := 0.U
 
     when (pktPayload.len === 0.U) {
       sendPayload := false.B
@@ -128,10 +131,18 @@ class SendPacketModule(outer: SendPacket, nicaddr: BigInt)
   when (read.resp.fire()) {
     switch (s) {
       is (s_wait) {
-        s := Mux(nicSentPackets > 1.U, s_ack, s_wait) // 2 segments = 2 comps
+        when (sendPayload) {
+          s := Mux(nicSentPackets > 1.U, s_ack, s_wait) // 2 segments = 2 comps
+        } .otherwise {
+          s := Mux(nicSentPackets > 0.U, s_ack, s_wait) // 1 segments = 1 comp
+        }
       }
       is (s_ack) {
-        s := s_comp
+        when (sendPayload) {
+          s := Mux(numAcksSent === 1.U, s_comp, s_ack) // do 2 acks
+        } .otherwise {
+          s := s_comp                                  // 1 ack
+        }
       }
     }
   }

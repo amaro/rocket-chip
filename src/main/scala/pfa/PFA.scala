@@ -65,7 +65,7 @@ class PFAFetchPathModule(outer: PFAFetchPath) extends LazyModuleImp(outer) {
   val sendPktPayload = sendPktReq.payload
 
   val s = RegInit(s_idle)
-  val targetaddr = RegInit(0.U(64.W))
+  val targetaddr = Wire(init = io.free.bits)
   val pageid = RegInit(0.U(28.W))
   val protbits = RegInit(0.U(10.W))
   val pteppn = RegInit(0.U(54.W))
@@ -79,11 +79,11 @@ class PFAFetchPathModule(outer: PFAFetchPath) extends LazyModuleImp(outer) {
 
   newpte := ((targetaddr >> 12.U) << 10.U) | protbits
 
-  io.fetch.req.ready := s === s_idle && targetaddr != 0.U && io.newpages.req.ready
+  io.fetch.req.ready := s === s_idle && io.free.valid && io.newpages.req.ready
   io.fetch.resp.valid := s === s_comp
   io.fetch.resp.bits := newpte
 
-  io.free.ready := s === s_idle
+  io.free.ready := false.B
 
   io.newpages.req.valid := s === s_comp
   io.newpages.req.bits.pageid := pageid
@@ -113,10 +113,6 @@ class PFAFetchPathModule(outer: PFAFetchPath) extends LazyModuleImp(outer) {
   write.req.bits.addr := pteppn
   write.resp.ready := s === s_modpte
 
-  when (io.free.fire()) {
-    targetaddr := io.free.bits
-  }
-
   when (io.fetch.req.fire()) {
     pageid := io.fetch.req.bits.pageid
     protbits := io.fetch.req.bits.protbits
@@ -140,8 +136,8 @@ class PFAFetchPathModule(outer: PFAFetchPath) extends LazyModuleImp(outer) {
   }
 
   when (io.fetch.resp.fire()) {
+    io.free.ready := true.B
     s := s_idle
-
   }
 }
 
@@ -229,7 +225,7 @@ trait PFAControllerModule extends HasRegMap {
   val evictsInProg = TwoWayCounter(io.evict.req.fire(), io.evict.resp.fire(), qDepth)
   val evictStat = RegInit(0.U(64.W))
   io.evict.req <> evictQueue.io.deq
-  io.evict.resp.ready := true.B // always ready to evict?
+  io.evict.resp.ready := true.B // control always ready to evict?
   evictStat := Mux(evictsInProg > evictQueue.io.count, evictsInProg, evictQueue.io.count)
 
   val workbufQueue = Module(new Queue(UInt(64.W), 1))

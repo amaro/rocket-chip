@@ -271,7 +271,7 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
           state := s_req
           count := count + 1
         }.otherwise {
-          when (pfa_rpte.remote()) {
+          when (pfa_rpte.remote() && io.pfa.req.ready) {
             pfa_pteppn := pte_addr
             state := s_pfareq
           } .otherwise {
@@ -298,6 +298,8 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
         r_pte := new PTE().fromBits(io.pfa.resp.bits)
         state := s_ready
         resp_valid(r_req_dest) := true
+        resp_ae := false
+        l2_refill := true
       }
     }
   }
