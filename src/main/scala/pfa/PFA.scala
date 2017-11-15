@@ -51,6 +51,8 @@ class PFAFetchPathModule(outer: PFAFetchPath) extends LazyModuleImp(outer) {
     val newpages = new NewpageIO
     val sendpacket = new SendPacketIO
     val recvpacket = new RecvPacketIO
+    val inprog = Output(Bool())
+    val evictinprog = Input(Bool())
   })
 
   val write = outer.tlwriter.module.io.write
@@ -77,9 +79,11 @@ class PFAFetchPathModule(outer: PFAFetchPath) extends LazyModuleImp(outer) {
   val frameFrag = Counter(recv.resp.fire(), 3)._1
   val newpte = RegInit(0.U(64.W))
 
+  io.inprog := s != s_idle
+
   newpte := ((targetaddr >> 12.U) << 10.U) | protbits
 
-  io.fetch.req.ready := s === s_idle && io.free.valid && io.newpages.req.ready
+  io.fetch.req.ready := s === s_idle && io.free.valid && io.newpages.req.ready && !io.evictinprog
   io.fetch.resp.valid := s === s_comp
   io.fetch.resp.bits := newpte
 
@@ -149,6 +153,7 @@ class PFAEvictPathModule(outer: PFAEvictPath, nicaddr: BigInt) extends LazyModul
   val io = IO(new Bundle {
     val evict = Flipped(new EvictIO)
     val sendpacket = new SendPacketIO
+    val inprog = Output(Bool())
   })
 
   val s_idle :: s_frame1 :: s_frame2 :: s_frame3 :: s_comp :: Nil = Enum(5)
@@ -163,6 +168,8 @@ class PFAEvictPathModule(outer: PFAEvictPath, nicaddr: BigInt) extends LazyModul
   val evictFired = RegNext(io.evict.req.fire(), false.B)
   val pageid = RegInit(0.U(32.W))
   val xactid = Counter(io.evict.req.fire(), (1 << 16) - 1)._1
+
+  io.inprog := s != s_idle
 
   io.evict.req.ready := s === s_idle
   io.evict.resp.valid := s === s_comp
@@ -215,6 +222,7 @@ trait PFAControllerBundle extends Bundle {
   val newpages = Flipped(new NewpageIO)
   val free = Decoupled(UInt(64.W))
   val workbuf = Valid(UInt(39.W))
+  val fetchinprog = Input(Bool())
 }
 
 trait PFAControllerModule extends HasRegMap {
@@ -223,10 +231,11 @@ trait PFAControllerModule extends HasRegMap {
 
   val evictQueue = Module(new Queue(UInt(64.W), qDepth))
   val evictsInProg = TwoWayCounter(io.evict.req.fire(), io.evict.resp.fire(), qDepth)
-  val evictStat = RegInit(0.U(64.W))
+  val evictStat = Wire(init = (0.U(64.W)))
   io.evict.req <> evictQueue.io.deq
-  io.evict.resp.ready := true.B // control always ready to evict?
-  evictStat := Mux(evictsInProg > evictQueue.io.count, evictsInProg, evictQueue.io.count)
+  io.evict.resp.ready := true.B // control always ready for eviction resp
+  evictStat := Mux(io.fetchinprog, qDepth.U,
+                   Mux(evictsInProg > evictQueue.io.count, evictsInProg, evictQueue.io.count))
 
   val workbufQueue = Module(new Queue(UInt(64.W), 1))
   io.workbuf.bits <> workbufQueue.io.deq.bits(38, 0)
@@ -293,12 +302,14 @@ class PFA(addr: BigInt, nicaddr: BigInt, beatBytes: Int = 8)(implicit p: Paramet
 
     evictPath.module.io.evict <> control.module.io.evict
     evictPath.module.io.sendpacket <> sendframePkt1.module.io.sendpacket
+    evictPath.module.io.inprog <> fetchPath.module.io.evictinprog
 
     io.remoteFault <> fetchPath.module.io.fetch
     fetchPath.module.io.sendpacket <> sendframePkt2.module.io.sendpacket
     fetchPath.module.io.recvpacket <> recvframePkt.module.io.recvpacket
     fetchPath.module.io.free <> control.module.io.free
     control.module.io.newpages <> fetchPath.module.io.newpages
+    control.module.io.fetchinprog <> fetchPath.module.io.inprog
   }
 }
 

@@ -75,9 +75,9 @@ class SendPacketModule(outer: SendPacket, nicaddr: BigInt)
   val sendReqFired = RegNext(io.sendpacket.req.fire(), false.B)
   val writeCompFired = RegNext(write.resp.fire(), false.B)
   val readCompFired = RegNext(read.resp.fire(), false.B)
-  val nicSentPackets = WireInit((read.resp.bits.data >> 40) & 0xF.U)
-  val nicWorkbufReq = WireInit(0.U(64.W))
-  val nicPayloadReq = WireInit(Cat(0.U(5.W), pktPayload.len, 0.U(9.W), pktPayload.addr))
+  val nicSentPackets = Wire(init = ((read.resp.bits.data >> 40) & 0xF.U))
+  val nicWorkbufReq = Wire(init = (0.U(64.W)))
+  val nicPayloadReq = Wire(init = (Cat(0.U(5.W), pktPayload.len, 0.U(9.W), pktPayload.addr)))
   val numAcksSent = Counter(read.resp.fire() && s === s_ack, 2)._1
 
   nicWorkbufReq := Cat(Mux(sendPayload, 1.U(1.W), 0.U(1.W)), 8.U(15.W), 0.U(9.W), io.workbuf.bits)
@@ -192,7 +192,7 @@ class RecvPacketModule(outer: RecvPacket, nicaddr: BigInt) extends LazyModuleImp
   val recvReqFired = RegNext(io.recvpacket.req.fire(), false.B)
   val writeRespFired = RegNext(write.resp.fire(), false.B)
   val readRespFired = RegNext(read.resp.fire(), false.B)
-  val nicRecvPackets = WireInit((read.resp.bits.data >> 44) & 0xF.U)
+  val nicRecvPackets = Wire(init = ((read.resp.bits.data >> 44) & 0xF.U))
 
   io.recvpacket.req.ready := s === s_idle
   io.recvpacket.resp.valid := s === s_comp
