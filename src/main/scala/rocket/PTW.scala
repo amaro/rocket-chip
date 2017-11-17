@@ -267,13 +267,13 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
       }
       when (io.mem.resp.valid) {
         r_pte := pte
+        pfa_rpte := new RemotePTE().fromBits(io.mem.resp.bits.data)
         when (traverse) {
           state := s_req
           count := count + 1
         }.otherwise {
           when (!pte.v && pte.r && io.pfa.req.ready) {
             pfa_pteppn := pte_addr
-            pfa_rpte := new RemotePTE().fromBits(pte.asUInt)
             state := s_pfareq
           } .otherwise {
             l2_refill := pte.v && !invalid_paddr && count === pgLevels-1
