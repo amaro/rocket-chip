@@ -227,7 +227,7 @@ trait PFAControllerBundle extends Bundle {
 
 trait PFAControllerModule extends HasRegMap {
   val io: PFAControllerBundle
-  val qDepth = 10
+  val qDepth = 64
 
   val evictQueue = Module(new Queue(UInt(64.W), qDepth))
   val evictsInProg = TwoWayCounter(io.evict.req.fire(), io.evict.resp.fire(), qDepth)
