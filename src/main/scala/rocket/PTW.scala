@@ -233,7 +233,7 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
   }
 
   val pfa_pteppn = RegInit(UInt(0, 54))
-  val pfa_rpte = pte.asTypeOf(new RemotePTE)
+  val pfa_rpte = Reg(new RemotePTE)
   io.pfa.req.valid := state === s_pfareq
   io.pfa.req.bits.pageid := pfa_rpte.pageid
   io.pfa.req.bits.protbits := pfa_rpte.prot
@@ -271,8 +271,9 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
           state := s_req
           count := count + 1
         }.otherwise {
-          when (pfa_rpte.remote() && io.pfa.req.ready) {
+          when (!pte.v && pte.r && io.pfa.req.ready) {
             pfa_pteppn := pte_addr
+            pfa_rpte := new RemotePTE().fromBits(pte.asUInt)
             state := s_pfareq
           } .otherwise {
             l2_refill := pte.v && !invalid_paddr && count === pgLevels-1
